@@ -312,16 +312,3 @@ export default function App() {
     </div>
   );
 }
-```
-
----
-
-### 🚀 적용 및 배포 반영 방법
-수정된 코드 적용 후 터미널에 아래 2줄을 치면 Vercel이 자동으로 최신 상태를 배포합니다.
-
-```bash
-git commit -am "feat: Add hour line border and weekly reset button"
-git push origin main
-```
-
-이제 Vercel 주소로 들어가서 정각 구분선이 잘 보이는지, 초기화 버튼이 잘 동작하는지 확인해 보세요!
