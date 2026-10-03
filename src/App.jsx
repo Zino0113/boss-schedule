@@ -23,9 +23,10 @@ export default function App() {
   const [mySlots, setMySlots] = useState([]);
   const [selectedUsers, setSelectedUsers] = useState([]);
   
-  // 드래그 선택 관련 State
+  // 드래그 및 범주 선택 (Shift + 클릭) 관련 State
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState(true); // true: 추가, false: 제거
+  const [lastSelectedSlot, setLastSelectedSlot] = useState(null); // { dayIdx, timeIdx }
   const isMouseDown = useRef(false);
 
   // 1. Supabase에서 모든 유저의 일정 불러오기
@@ -35,12 +36,10 @@ export default function App() {
       console.error('Error fetching schedules:', error);
     } else if (data) {
       setSchedules(data);
-      // 로그인되어 있다면 내 기존 데이터 로드
       if (userName) {
         const myData = data.find((s) => s.user_name === userName);
         if (myData) setMySlots(myData.slots || []);
       }
-      // 처음 로드 시 전원 선택 처리
       if (selectedUsers.length === 0) {
         setSelectedUsers(data.map((s) => s.user_name));
       }
@@ -84,14 +83,13 @@ export default function App() {
     fetchSchedules();
   };
 
-  // 4. 전체 일정 초기화 (매주 리셋용)
+  // 4. 전체 일정 초기화
   const handleResetAll = async () => {
     if (!window.confirm('⚠️ 이번 주 모든 파티원의 일정을 정말로 초기화하시겠습니까?\n(이 작업은 되돌릴 수 없습니다.)')) {
       return;
     }
 
     try {
-      // DB의 모든 유저 slots를 빈 배열로 업데이트
       const { error } = await supabase
         .from('boss_schedules')
         .update({ slots: [] })
@@ -108,13 +106,48 @@ export default function App() {
     }
   };
 
-  // 5. 드래그로 셀 선택
-  const handleSlotMouseDown = (slotKey) => {
+  // 5. 셀 클릭 / 드래그 / Shift + 클릭 범위 선택 로직
+  const handleSlotMouseDown = (slotKey, e) => {
     if (!isLoggedIn) return;
+
+    const [day, time] = slotKey.split('-');
+    const dayIdx = DAYS.indexOf(day);
+    const timeIdx = TIMES.indexOf(time);
+
+    // Shift 키 누른 상태에서의 사각형 범위 선택
+    if (e.shiftKey && lastSelectedSlot) {
+      const startDay = Math.min(lastSelectedSlot.dayIdx, dayIdx);
+      const endDay = Math.max(lastSelectedSlot.dayIdx, dayIdx);
+      const startTime = Math.min(lastSelectedSlot.timeIdx, timeIdx);
+      const endTime = Math.max(lastSelectedSlot.timeIdx, timeIdx);
+
+      const rangeSlots = [];
+      for (let d = startDay; d <= endDay; d++) {
+        for (let t = startTime; t <= endTime; t++) {
+          rangeSlots.push(`${DAYS[d]}-${TIMES[t]}`);
+        }
+      }
+
+      // 범위 내 모든 칸이 이미 선택되어 있으면 전체 해제, 하나라도 비어 있으면 전체 선택
+      const allSelected = rangeSlots.every((s) => mySlots.includes(s));
+
+      if (allSelected) {
+        setMySlots((prev) => prev.filter((s) => !rangeSlots.includes(s)));
+      } else {
+        setMySlots((prev) => Array.from(new Set([...prev, ...rangeSlots])));
+      }
+
+      setLastSelectedSlot({ dayIdx, timeIdx });
+      return;
+    }
+
+    // 일반 단일 클릭 및 드래그 시작
     isMouseDown.current = true;
     setIsDragging(true);
+    setLastSelectedSlot({ dayIdx, timeIdx });
+
     const exists = mySlots.includes(slotKey);
-    setDragMode(!exists); // 없으면 추가 모드, 있으면 제거 모드
+    setDragMode(!exists);
 
     if (!exists) {
       setMySlots((prev) => [...prev, slotKey]);
@@ -144,7 +177,7 @@ export default function App() {
   const getSlotAvailability = (slotKey) => {
     if (activeUserCount === 0) return 0;
     const availableCount = activeSchedules.filter((s) => s.slots?.includes(slotKey)).length;
-    return availableCount / activeUserCount; // 0 ~ 1 비율
+    return availableCount / activeUserCount;
   };
 
   const getCellColor = (slotKey) => {
@@ -153,7 +186,7 @@ export default function App() {
     if (ratio <= 0.25) return 'bg-emerald-100';
     if (ratio <= 0.5) return 'bg-emerald-300';
     if (ratio <= 0.75) return 'bg-emerald-500 text-white';
-    return 'bg-emerald-700 text-white font-bold'; // 전원 가능
+    return 'bg-emerald-700 text-white font-bold';
   };
 
   const toggleUserSelect = (name) => {
@@ -165,82 +198,86 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8 select-none" onMouseUp={handleMouseUp}>
-      <header className="max-w-6xl mx-auto mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <Clock className="w-7 h-7 text-emerald-600" /> 보스 레이드 일정 조율기
-          </h1>
-          <p className="text-sm text-slate-500">When2Meet + 파티원 선택 필터 기능</p>
+    <div className="h-screen w-screen bg-slate-50 p-2 md:p-3 select-none flex flex-col overflow-hidden" onMouseUp={handleMouseUp}>
+      {/* 상단 헤더 (컴팩트 바) */}
+      <header className="max-w-7xl w-full mx-auto mb-2 flex justify-between items-center shrink-0">
+        <div className="flex items-center gap-2">
+          <Clock className="w-5 h-5 text-emerald-600" />
+          <h1 className="text-lg font-bold text-slate-800">보스 레이드 일정 조율기</h1>
+          <span className="hidden sm:inline text-xs text-slate-400">| 스크롤 없는 한 화면 시간표</span>
         </div>
 
-        {/* 닉네임 입력 및 저장 바 */}
+        {/* 닉네임 입력 및 저장 */}
         {!isLoggedIn ? (
-          <form onSubmit={handleLogin} className="flex gap-2 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
+          <form onSubmit={handleLogin} className="flex gap-1.5 bg-white p-1 rounded border border-slate-200">
             <input
               type="text"
-              placeholder="내 캐릭터명/이름"
+              placeholder="캐릭터명 입력"
               value={userName}
               onChange={(e) => setUserName(e.target.value)}
-              className="px-3 py-1.5 text-sm border rounded outline-none focus:border-emerald-500"
+              className="px-2 py-1 text-xs border rounded outline-none focus:border-emerald-500 w-32"
             />
-            <button type="submit" className="bg-emerald-600 text-white px-4 py-1.5 rounded text-sm font-medium hover:bg-emerald-700 flex items-center gap-1">
-              <LogIn className="w-4 h-4" /> 입장
+            <button type="submit" className="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-emerald-700 flex items-center gap-1">
+              <LogIn className="w-3.5 h-3.5" /> 입장
             </button>
           </form>
         ) : (
-          <div className="flex items-center gap-3 bg-white p-2 px-4 rounded-lg shadow-sm border border-slate-200">
-            <span className="text-sm font-medium text-slate-700">
-              접속자: <strong className="text-emerald-600">{userName}</strong>
+          <div className="flex items-center gap-2 bg-white p-1 px-3 rounded border border-slate-200">
+            <span className="text-xs font-medium text-slate-700">
+              <strong className="text-emerald-600">{userName}</strong>
             </span>
-            <button onClick={handleSave} className="bg-emerald-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-emerald-700 flex items-center gap-1">
-              <Save className="w-4 h-4" /> 내 일정 저장
+            <button onClick={handleSave} className="bg-emerald-600 text-white px-2.5 py-1 rounded text-xs font-medium hover:bg-emerald-700 flex items-center gap-1">
+              <Save className="w-3.5 h-3.5" /> 내 일정 저장
             </button>
           </div>
         )}
       </header>
 
-      <main className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-6">
+      {/* 메인 컨텐츠 영역 (100% 높이 맞춤) */}
+      <main className="max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-4 gap-3 flex-1 min-h-0 overflow-hidden">
         {/* 시간표 메인 영역 */}
-        <div className="lg:col-span-3 bg-white p-4 rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
-          <div className="flex justify-between items-center mb-4">
-            <span className="text-xs text-slate-500">
-              * {isLoggedIn ? '표를 드래그해서 가능한 시간을 선택하세요.' : '입장 후 가능 시간을 수정할 수 있습니다.'}
+        <div className="lg:col-span-3 bg-white p-2.5 rounded-lg shadow-sm border border-slate-200 flex flex-col min-h-0 h-full">
+          <div className="flex justify-between items-center mb-1.5 shrink-0">
+            <span className="text-[11px] text-slate-500">
+              * {isLoggedIn ? '드래그 또는 Shift+클릭으로 대량 범위를 한 번에 선택할 수 있습니다.' : '입장 후 시간을 수정할 수 있습니다.'}
             </span>
             
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
               <button onClick={fetchSchedules} className="text-slate-500 hover:text-slate-800 text-xs flex items-center gap-1">
-                <RefreshCw className="w-3.5 h-3.5" /> 새로고침
+                <RefreshCw className="w-3 h-3" /> 새로고침
               </button>
               <button 
                 onClick={handleResetAll} 
-                className="text-red-500 hover:text-red-700 text-xs font-semibold flex items-center gap-1 bg-red-50 px-2.5 py-1 rounded border border-red-100 transition-colors"
-                title="매주 목요일 초기화용"
+                className="text-red-500 hover:text-red-700 text-[11px] font-semibold flex items-center gap-1 bg-red-50 px-2 py-0.5 rounded border border-red-100 transition-colors"
+                title="매주 초기화용"
               >
-                <RotateCcw className="w-3.5 h-3.5" /> 이번 주 일정 전체 초기화
+                <RotateCcw className="w-3 h-3" /> 이번 주 일정 초기화
               </button>
             </div>
           </div>
 
-          <div className="min-w-[500px]">
+          <div className="flex flex-col flex-1 min-h-0 w-full">
             {/* 요일 헤더 */}
-            <div className="grid grid-cols-8 gap-1 mb-2 text-center text-xs font-semibold text-slate-600">
-              <div className="py-1">시간</div>
+            <div className="grid grid-cols-8 gap-1 mb-1 text-center text-xs font-semibold text-slate-600 shrink-0">
+              <div className="py-0.5">시간</div>
               {DAYS.map((day) => (
-                <div key={day} className="py-1 bg-slate-100 rounded">{day}</div>
+                <div key={day} className="py-0.5 bg-slate-100 rounded text-[11px]">{day}</div>
               ))}
             </div>
 
-            {/* 타임 슬롯 테이블 (00시~24시) */}
-            <div className="max-h-[600px] overflow-y-auto pr-1">
+            {/* 48개 슬롯 그리드 (스크롤 없이 높이 비율 자동 조절) */}
+            <div className="flex-1 grid grid-rows-[repeat(48,minmax(0,1fr))] gap-[1px] min-h-0 w-full">
               {TIMES.map((time) => {
-                const isHour = time.endsWith(':00'); // 정각 구분선 확인
+                const isHour = time.endsWith(':00');
 
                 return (
-                  <div key={time} className="grid grid-cols-8 gap-1 mb-1 text-center text-xs">
-                    <div className={`text-slate-400 font-mono flex items-center justify-center text-[11px] bg-slate-50 rounded ${isHour ? 'font-semibold text-slate-600' : ''}`}>
+                  <div key={time} className="grid grid-cols-8 gap-1 w-full h-full items-center">
+                    {/* 시간 표시 */}
+                    <div className={`h-full text-slate-500 font-mono flex items-center justify-center text-[9px] bg-slate-50 rounded ${isHour ? 'font-bold text-slate-700' : ''}`}>
                       {time}
                     </div>
+
+                    {/* 요일별 셀 */}
                     {DAYS.map((day) => {
                       const slotKey = `${day}-${time}`;
                       const isMySelected = mySlots.includes(slotKey);
@@ -249,13 +286,12 @@ export default function App() {
                       return (
                         <div
                           key={slotKey}
-                          onMouseDown={() => handleSlotMouseDown(slotKey)}
+                          onMouseDown={(e) => handleSlotMouseDown(slotKey, e)}
                           onMouseEnter={() => handleSlotMouseEnter(slotKey)}
-                          className={`h-7 rounded border transition-colors cursor-pointer flex items-center justify-center font-mono text-[10px] ${cellColor} ${
-                            isMySelected ? 'ring-2 ring-emerald-500 ring-offset-1 z-10' : ''
+                          className={`h-full rounded-[2px] transition-colors cursor-pointer flex items-center justify-center ${cellColor} ${
+                            isMySelected ? 'ring-1 ring-emerald-600 z-10' : ''
                           } ${
-                            // 정각이면 상단 테두리를 굵게 강조!
-                            isHour ? 'border-t-2 border-t-slate-400 border-slate-200' : 'border-slate-100'
+                            isHour ? 'border-t border-t-slate-400' : 'border-t border-t-slate-100'
                           }`}
                         >
                         </div>
@@ -268,18 +304,20 @@ export default function App() {
           </div>
         </div>
 
-        {/* 우측 파티원 선택 필터 사이드바 */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-fit">
-          <h2 className="text-base font-bold text-slate-800 mb-3 flex items-center gap-2">
-            <Users className="w-5 h-5 text-emerald-600" /> 파티원 필터
-          </h2>
-          <p className="text-xs text-slate-500 mb-4">
-            체크된 파티원들 간의 겹치는 시간만 표시됩니다.
-          </p>
+        {/* 우측 파티원 필터 */}
+        <div className="bg-white p-3 rounded-lg shadow-sm border border-slate-200 flex flex-col h-full min-h-0">
+          <div className="shrink-0 mb-2">
+            <h2 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <Users className="w-4 h-4 text-emerald-600" /> 파티원 필터
+            </h2>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              체크된 멤버의 교집합 시간이 표시됩니다.
+            </p>
+          </div>
 
-          <div className="space-y-2 max-h-[500px] overflow-y-auto">
+          <div className="space-y-1 overflow-y-auto flex-1 min-h-0 pr-1">
             {schedules.length === 0 ? (
-              <p className="text-xs text-slate-400 py-2">아직 등록된 파티원이 없습니다.</p>
+              <p className="text-xs text-slate-400 py-2">등록된 파티원이 없습니다.</p>
             ) : (
               schedules.map((s) => {
                 const isSelected = selectedUsers.includes(s.user_name);
@@ -287,20 +325,20 @@ export default function App() {
                   <div
                     key={s.user_name}
                     onClick={() => toggleUserSelect(s.user_name)}
-                    className="flex items-center justify-between p-2 rounded hover:bg-slate-50 cursor-pointer border border-slate-100"
+                    className="flex items-center justify-between p-1.5 rounded hover:bg-slate-50 cursor-pointer border border-slate-100 text-xs"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       {isSelected ? (
-                        <CheckSquare className="w-4 h-4 text-emerald-600" />
+                        <CheckSquare className="w-3.5 h-3.5 text-emerald-600" />
                       ) : (
-                        <Square className="w-4 h-4 text-slate-300" />
+                        <Square className="w-3.5 h-3.5 text-slate-300" />
                       )}
-                      <span className={`text-sm ${isSelected ? 'font-medium text-slate-800' : 'text-slate-400'}`}>
+                      <span className={`${isSelected ? 'font-medium text-slate-800' : 'text-slate-400'}`}>
                         {s.user_name}
                       </span>
                     </div>
-                    <span className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500">
-                      {s.slots?.length || 0}개
+                    <span className="text-[9px] bg-slate-100 px-1 py-0.2 rounded text-slate-500">
+                      {s.slots?.length || 0}
                     </span>
                   </div>
                 );
