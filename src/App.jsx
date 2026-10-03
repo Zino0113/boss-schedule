@@ -1,7 +1,7 @@
 /* File: src/App.jsx */
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Users, Clock, Save, RefreshCw, CheckSquare, Square, LogIn } from 'lucide-react';
+import { Users, Clock, Save, RefreshCw, CheckSquare, Square, LogIn, RotateCcw } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -84,7 +84,31 @@ export default function App() {
     fetchSchedules();
   };
 
-  // 4. 드래그로 셀 선택
+  // 4. 전체 일정 초기화 (매주 리셋용)
+  const handleResetAll = async () => {
+    if (!window.confirm('⚠️ 이번 주 모든 파티원의 일정을 정말로 초기화하시겠습니까?\n(이 작업은 되돌릴 수 없습니다.)')) {
+      return;
+    }
+
+    try {
+      // DB의 모든 유저 slots를 빈 배열로 업데이트
+      const { error } = await supabase
+        .from('boss_schedules')
+        .update({ slots: [] })
+        .neq('user_name', '');
+
+      if (error) throw error;
+
+      setMySlots([]);
+      alert('모든 파티원의 일정이 초기화되었습니다.');
+      fetchSchedules();
+    } catch (err) {
+      console.error('초기화 에러:', err);
+      alert('초기화 중 오류가 발생했습니다.');
+    }
+  };
+
+  // 5. 드래그로 셀 선택
   const handleSlotMouseDown = (slotKey) => {
     if (!isLoggedIn) return;
     isMouseDown.current = true;
@@ -113,7 +137,7 @@ export default function App() {
     setIsDragging(false);
   };
 
-  // 5. 선택한 유저 필터링 및 색상 계산
+  // 6. 선택한 유저 필터링 및 색상 계산
   const activeSchedules = schedules.filter((s) => selectedUsers.includes(s.user_name));
   const activeUserCount = selectedUsers.length;
 
@@ -183,9 +207,19 @@ export default function App() {
             <span className="text-xs text-slate-500">
               * {isLoggedIn ? '표를 드래그해서 가능한 시간을 선택하세요.' : '입장 후 가능 시간을 수정할 수 있습니다.'}
             </span>
-            <button onClick={fetchSchedules} className="text-slate-500 hover:text-slate-800 text-xs flex items-center gap-1">
-              <RefreshCw className="w-3.5 h-3.5" /> 새로고침
-            </button>
+            
+            <div className="flex items-center gap-3">
+              <button onClick={fetchSchedules} className="text-slate-500 hover:text-slate-800 text-xs flex items-center gap-1">
+                <RefreshCw className="w-3.5 h-3.5" /> 새로고침
+              </button>
+              <button 
+                onClick={handleResetAll} 
+                className="text-red-500 hover:text-red-700 text-xs font-semibold flex items-center gap-1 bg-red-50 px-2.5 py-1 rounded border border-red-100 transition-colors"
+                title="매주 목요일 초기화용"
+              >
+                <RotateCcw className="w-3.5 h-3.5" /> 이번 주 일정 전체 초기화
+              </button>
+            </div>
           </div>
 
           <div className="min-w-[500px]">
@@ -199,31 +233,37 @@ export default function App() {
 
             {/* 타임 슬롯 테이블 (00시~24시) */}
             <div className="max-h-[600px] overflow-y-auto pr-1">
-              {TIMES.map((time) => (
-                <div key={time} className="grid grid-cols-8 gap-1 mb-1 text-center text-xs">
-                  <div className="text-slate-400 font-mono flex items-center justify-center text-[11px] bg-slate-50 rounded">
-                    {time}
-                  </div>
-                  {DAYS.map((day) => {
-                    const slotKey = `${day}-${time}`;
-                    const isMySelected = mySlots.includes(slotKey);
-                    const cellColor = getCellColor(slotKey);
+              {TIMES.map((time) => {
+                const isHour = time.endsWith(':00'); // 정각 구분선 확인
 
-                    return (
-                      <div
-                        key={slotKey}
-                        onMouseDown={() => handleSlotMouseDown(slotKey)}
-                        onMouseEnter={() => handleSlotMouseEnter(slotKey)}
-                        className={`h-7 rounded border border-slate-100 transition-colors cursor-pointer flex items-center justify-center font-mono text-[10px] ${
-                          isLoggedIn ? cellColor : cellColor
-                        } ${isMySelected ? 'ring-2 ring-emerald-500 ring-offset-1' : ''}`}
-                      >
-                        {/* 짙은 색 셀에 테두리/표시 강조 */}
-                      </div>
-                    );
-                  })}
-                </div>
-              ))}
+                return (
+                  <div key={time} className="grid grid-cols-8 gap-1 mb-1 text-center text-xs">
+                    <div className={`text-slate-400 font-mono flex items-center justify-center text-[11px] bg-slate-50 rounded ${isHour ? 'font-semibold text-slate-600' : ''}`}>
+                      {time}
+                    </div>
+                    {DAYS.map((day) => {
+                      const slotKey = `${day}-${time}`;
+                      const isMySelected = mySlots.includes(slotKey);
+                      const cellColor = getCellColor(slotKey);
+
+                      return (
+                        <div
+                          key={slotKey}
+                          onMouseDown={() => handleSlotMouseDown(slotKey)}
+                          onMouseEnter={() => handleSlotMouseEnter(slotKey)}
+                          className={`h-7 rounded border transition-colors cursor-pointer flex items-center justify-center font-mono text-[10px] ${cellColor} ${
+                            isMySelected ? 'ring-2 ring-emerald-500 ring-offset-1 z-10' : ''
+                          } ${
+                            // 정각이면 상단 테두리를 굵게 강조!
+                            isHour ? 'border-t-2 border-t-slate-400 border-slate-200' : 'border-slate-100'
+                          }`}
+                        >
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -272,3 +312,16 @@ export default function App() {
     </div>
   );
 }
+```
+
+---
+
+### 🚀 적용 및 배포 반영 방법
+수정된 코드 적용 후 터미널에 아래 2줄을 치면 Vercel이 자동으로 최신 상태를 배포합니다.
+
+```bash
+git commit -am "feat: Add hour line border and weekly reset button"
+git push origin main
+```
+
+이제 Vercel 주소로 들어가서 정각 구분선이 잘 보이는지, 초기화 버튼이 잘 동작하는지 확인해 보세요!
