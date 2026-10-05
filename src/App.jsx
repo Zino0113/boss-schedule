@@ -893,11 +893,9 @@ export default function App() {
                     onChange={(e) => setStartHour(e.target.value)}
                     className="w-full px-2.5 py-1.5 text-xs border dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
-                    <option value={9}>09:00 (게이머/레이드 추천)</option>
-                    <option value={6}>06:00 (새벽 리셋 기준)</option>
+                    <option value={9}>09:00 (발방 기준)</option>
+                    <option value={6}>06:00 (일반인 기준)</option>
                     <option value={0}>00:00 (자정 기준)</option>
-                    <option value={12}>12:00 (정오 기준)</option>
-                    <option value={18}>18:00 (저녁 기준)</option>
                   </select>
                 </div>
                 <div>
