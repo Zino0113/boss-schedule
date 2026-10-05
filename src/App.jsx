@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { 
   Users, Clock, Save, RefreshCw, CheckSquare, Square, LogIn, 
-  RotateCcw, Plus, X, Calendar, Settings, Trash2, Edit3, FileText, Info 
+  RotateCcw, Plus, X, Calendar, Settings, Trash2, Edit3, Sun, Moon 
 } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -58,6 +58,10 @@ const generateTimeSlots = (startHour, endHour) => {
 };
 
 export default function App() {
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem('theme') === 'dark';
+  });
+
   const [userName, setUserName] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
@@ -70,9 +74,9 @@ export default function App() {
   const [mySlots, setMySlots] = useState([]);
   const [selectedUsers, setSelectedUsers] = useState([]);
 
-  // 모달 창 State (생성 & 수정 겸용)
+  // 모달 창 State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingTabId, setEditingTabId] = useState(null); // null이면 생성, 문자열이면 수정
+  const [editingTabId, setEditingTabId] = useState(null);
   const [newTitle, setNewTitle] = useState('발방 레이드');
   const [newDescription, setNewDescription] = useState('매주 목요일 보스 일정 조율');
   const [startDate, setStartDate] = useState(formatDateToISO(new Date()));
@@ -89,6 +93,15 @@ export default function App() {
   const [dragMode, setDragMode] = useState(true);
   const [lastSelectedSlot, setLastSelectedSlot] = useState(null);
   const isMouseDown = useRef(false);
+
+  // 다크모드 토글 및 저장
+  const toggleDarkMode = () => {
+    setDarkMode((prev) => {
+      const next = !prev;
+      localStorage.setItem('theme', next ? 'dark' : 'light');
+      return next;
+    });
+  };
 
   const fetchTabs = async () => {
     try {
@@ -209,7 +222,7 @@ export default function App() {
   const openCreateModal = () => {
     setEditingTabId(null);
     setNewTitle('신규 레이드 시간표');
-    setNewDescription('참여 가능 시간을 클릭해 주세요.');
+    setNewDescription('참여 가능 시간을 선택해 주세요.');
     setStartDate(formatDateToISO(new Date()));
     const d = new Date();
     d.setDate(d.getDate() + 6);
@@ -235,7 +248,6 @@ export default function App() {
     e.preventDefault();
 
     if (editingTabId) {
-      // 1. 탭 정보 업데이트
       const updatedTabObj = {
         id: editingTabId,
         title: newTitle || '시간표',
@@ -254,7 +266,6 @@ export default function App() {
 
       setTabs((prev) => prev.map((t) => (t.id === editingTabId ? updatedTabObj : t)));
 
-      // 2. 스마트 데이터 보존: 변경된 날짜/시간 범위 계산
       const validDates = generateDateList(startDate, endDate).map((d) => d.iso);
       const validTimes = generateTimeSlots(startHour, endHour);
       const validKeysSet = new Set();
@@ -264,7 +275,6 @@ export default function App() {
         });
       });
 
-      // 기존 유저 일정 필터링 및 DB 업데이트
       const updatedSchedules = schedules.map((s) => {
         const filteredSlots = (s.slots || []).filter((slotKey) => validKeysSet.has(slotKey));
         return { ...s, slots: filteredSlots };
@@ -272,11 +282,9 @@ export default function App() {
 
       setSchedules(updatedSchedules);
 
-      // 내 슬롯도 정제
       const myFiltered = mySlots.filter((slotKey) => validKeysSet.has(slotKey));
       setMySlots(myFiltered);
 
-      // Supabase에도 정제된 슬롯 업데이트
       for (const s of updatedSchedules) {
         try {
           await supabase
@@ -291,7 +299,6 @@ export default function App() {
 
       alert('시간표 설정이 수정되었습니다. (새 범위 내 기존 일정 자동 유지)');
     } else {
-      // 신규 탭 추가
       const newTabObj = {
         id: `tab-${Date.now()}`,
         title: newTitle || '새 시간표',
@@ -338,7 +345,7 @@ export default function App() {
   };
 
   const handleResetTabSchedules = async () => {
-    if (!window.confirm(`⚠️ [${activeTab?.title}] 시간표의 모든 파티원 가능 시간을 초기화하시겠습니까?\n(시간표 설정은 유지됩니다.)`)) {
+    if (!window.confirm(`⚠️ [${activeTab?.title}] 시간표의 모든 파티원 가능 시간 및 참여자 목록을 초기화하시겠습니까?\n(시간표 설정은 유지됩니다.)`)) {
       return;
     }
 
@@ -350,11 +357,33 @@ export default function App() {
 
       setMySlots([]);
       setSchedules([]);
-      alert('시간표의 모든 유저 일정이 초기화되었습니다.');
-      fetchSchedules(activeTabId);
+      setSelectedUsers([]);
+      alert('시간표의 모든 유저 일정 및 참여자 목록이 초기화되었습니다.');
     } catch (err) {
       console.error('초기화 에러:', err);
       alert('초기화 중 오류가 발생했습니다.');
+    }
+  };
+
+  // 파티원 개별 삭제
+  const handleDeleteUser = async (targetUserName, e) => {
+    e.stopPropagation();
+    if (!window.confirm(`'${targetUserName}' 파티원의 일정을 이 시간표에서 삭제하시겠습니까?`)) return;
+
+    try {
+      await supabase
+        .from('boss_schedules')
+        .delete()
+        .eq('tab_id', activeTabId)
+        .eq('user_name', targetUserName);
+
+      setSchedules((prev) => prev.filter((s) => s.user_name !== targetUserName));
+      setSelectedUsers((prev) => prev.filter((u) => u !== targetUserName));
+      if (targetUserName === userName) {
+        setMySlots([]);
+      }
+    } catch (err) {
+      console.error('User delete error:', err);
     }
   };
 
@@ -427,10 +456,10 @@ export default function App() {
 
   const getCellColor = (slotKey) => {
     const ratio = getSlotAvailability(slotKey);
-    if (ratio === 0) return 'bg-white';
-    if (ratio <= 0.25) return 'bg-emerald-100';
-    if (ratio <= 0.5) return 'bg-emerald-300';
-    if (ratio <= 0.75) return 'bg-emerald-500 text-white';
+    if (ratio === 0) return darkMode ? 'bg-slate-900' : 'bg-white';
+    if (ratio <= 0.25) return darkMode ? 'bg-emerald-950/70 text-emerald-300' : 'bg-emerald-100 text-emerald-900';
+    if (ratio <= 0.5) return darkMode ? 'bg-emerald-800 text-emerald-100' : 'bg-emerald-300 text-slate-900';
+    if (ratio <= 0.75) return 'bg-emerald-500 text-white font-medium';
     return 'bg-emerald-700 text-white font-bold';
   };
 
@@ -443,45 +472,57 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-3 md:p-6 select-none flex flex-col pb-12" onMouseUp={handleMouseUp}>
+    <div className={`${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'} min-h-screen p-3 md:p-6 select-none flex flex-col pb-12 transition-colors duration-200`} onMouseUp={handleMouseUp}>
       {/* 최상단 헤더 */}
       <header className="max-w-7xl w-full mx-auto mb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div className="flex items-center gap-2.5">
-          <Clock className="w-7 h-7 text-emerald-600" />
+          <Clock className="w-7 h-7 text-emerald-500" />
           <div>
-            <h1 className="text-xl md:text-2xl font-black text-slate-800 tracking-tight">발방 시간표</h1>
-            <p className="text-xs text-slate-500">원하는 시간 드래그 또는 Shift+클릭 범위 선택</p>
+            <h1 className="text-xl md:text-2xl font-black tracking-tight flex items-center gap-2">
+              발방 시간표
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400">원하는 시간 드래그 또는 Shift+클릭 범위 선택</p>
           </div>
         </div>
 
-        {/* 닉네임 입력 및 저장 바 */}
-        {!isLoggedIn ? (
-          <form onSubmit={handleLogin} className="flex gap-1.5 bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm w-full sm:w-auto">
-            <input
-              type="text"
-              placeholder="캐릭터명 입력"
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              className="px-2.5 py-1 text-xs border rounded outline-none focus:border-emerald-500 w-36"
-            />
-            <button type="submit" className="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-emerald-700 flex items-center gap-1 shrink-0">
-              <LogIn className="w-3.5 h-3.5" /> 입장
-            </button>
-          </form>
-        ) : (
-          <div className="flex items-center gap-2 bg-white p-1.5 px-3 rounded-lg border border-slate-200 shadow-sm">
-            <span className="text-xs font-medium text-slate-700">
-              접속자: <strong className="text-emerald-600">{userName}</strong>
-            </span>
-            <button onClick={handleSave} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-medium hover:bg-emerald-700 flex items-center gap-1">
-              <Save className="w-3.5 h-3.5" /> 내 일정 저장
-            </button>
-          </div>
-        )}
+        {/* 다크모드 토글 및 닉네임 바 */}
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <button
+            onClick={toggleDarkMode}
+            className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
+            title={darkMode ? '라이트 모드로 변경' : '다크 모드로 변경'}
+          >
+            {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-slate-700" />}
+          </button>
+
+          {!isLoggedIn ? (
+            <form onSubmit={handleLogin} className="flex gap-1.5 bg-white dark:bg-slate-900 p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm w-full sm:w-auto">
+              <input
+                type="text"
+                placeholder="캐릭터명 입력"
+                value={userName}
+                onChange={(e) => setUserName(e.target.value)}
+                className="px-2.5 py-1 text-xs border dark:border-slate-700 rounded outline-none focus:border-emerald-500 bg-transparent w-36"
+              />
+              <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded text-xs font-medium flex items-center gap-1 shrink-0 transition-colors">
+                <LogIn className="w-3.5 h-3.5" /> 입장
+              </button>
+            </form>
+          ) : (
+            <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1.5 px-3 rounded-lg border border-slate-200 dark:border-slate-800 shadow-sm">
+              <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
+                접속자: <strong className="text-emerald-500">{userName}</strong>
+              </span>
+              <button onClick={handleSave} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded text-xs font-medium flex items-center gap-1 transition-colors">
+                <Save className="w-3.5 h-3.5" /> 내 일정 저장
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
       {/* 탭 바 영역 */}
-      <div className="max-w-7xl w-full mx-auto mb-2 flex items-center gap-1 overflow-x-auto pb-1 border-b border-slate-200">
+      <div className="max-w-7xl w-full mx-auto mb-2 flex items-center gap-1 overflow-x-auto pb-1 border-b border-slate-200 dark:border-slate-800">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           return (
@@ -490,16 +531,16 @@ export default function App() {
               onClick={() => setActiveTabId(tab.id)}
               className={`flex items-center gap-2 px-3.5 py-1.5 rounded-t-lg text-xs font-medium cursor-pointer transition-all border-t border-x shrink-0 ${
                 isActive
-                  ? 'bg-white border-slate-300 text-emerald-700 font-bold border-b-2 border-b-emerald-600 shadow-sm'
-                  : 'bg-slate-200/70 border-transparent text-slate-600 hover:bg-slate-200'
+                  ? 'bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-emerald-600 dark:text-emerald-400 font-bold border-b-2 border-b-emerald-500 shadow-sm'
+                  : 'bg-slate-200/70 dark:bg-slate-800/60 border-transparent text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
               }`}
             >
-              <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+              <Calendar className="w-3.5 h-3.5 text-emerald-500" />
               <span>{tab.title}</span>
               {tabs.length > 1 && (
                 <button
                   onClick={(e) => handleDeleteTab(tab.id, e)}
-                  className="hover:bg-slate-300 p-0.5 rounded-full transition-colors text-slate-400 hover:text-slate-700"
+                  className="hover:bg-slate-300 dark:hover:bg-slate-700 p-0.5 rounded-full transition-colors text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                   title="탭 삭제"
                 >
                   <X className="w-3 h-3" />
@@ -512,7 +553,7 @@ export default function App() {
         {/* 새 시간표 추가 버튼 */}
         <button
           onClick={openCreateModal}
-          className="p-1.5 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition-colors flex items-center gap-1 text-xs font-semibold px-2.5 shrink-0"
+          className="p-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 hover:bg-emerald-200 dark:hover:bg-emerald-900 text-emerald-800 dark:text-emerald-300 transition-colors flex items-center gap-1 text-xs font-semibold px-2.5 shrink-0"
           title="새 시간표 추가"
         >
           <Plus className="w-4 h-4" />
@@ -523,31 +564,30 @@ export default function App() {
       {/* 메인 콘텐츠 영역 */}
       <main className="max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
         {/* 좌측 메인 시간표 */}
-        <div className="lg:col-span-3 bg-white p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col">
+        <div className="lg:col-span-3 bg-white dark:bg-slate-900 p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col">
           {/* 상단 액션 바 */}
           <div className="flex flex-wrap justify-between items-center gap-2 mb-3 shrink-0">
-            <span className="text-xs text-slate-500 font-medium">
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
               * {isLoggedIn ? 'Shift + 클릭으로 직사각형 범위를 선택할 수 있습니다.' : '입장 후 가능 시간을 수정할 수 있습니다.'}
             </span>
 
             <div className="flex items-center gap-1.5">
-              <button onClick={() => fetchSchedules(activeTabId)} className="text-slate-500 hover:text-slate-800 text-xs flex items-center gap-1 px-2 py-1 rounded bg-slate-100">
+              <button onClick={() => fetchSchedules(activeTabId)} className="text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 text-xs flex items-center gap-1 px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 transition-colors">
                 <RefreshCw className="w-3.5 h-3.5" /> 새로고침
               </button>
               
-              {/* 탭 관리 버튼그룹: 수정 / 초기화 / 삭제 */}
               <button
                 onClick={openEditModal}
-                className="text-slate-700 hover:text-emerald-700 text-xs font-semibold flex items-center gap-1 bg-slate-100 hover:bg-emerald-50 px-2 py-1 rounded border border-slate-200 transition-colors"
+                className="text-slate-700 dark:text-slate-300 hover:text-emerald-600 text-xs font-semibold flex items-center gap-1 bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 transition-colors"
                 title="시간표 설정 수정"
               >
-                <Edit3 className="w-3.5 h-3.5 text-emerald-600" /> 설정 수정
+                <Edit3 className="w-3.5 h-3.5 text-emerald-500" /> 설정 수정
               </button>
 
               <button
                 onClick={handleResetTabSchedules}
-                className="text-amber-700 hover:text-amber-900 text-xs font-semibold flex items-center gap-1 bg-amber-50 hover:bg-amber-100 px-2 py-1 rounded border border-amber-200 transition-colors"
-                title="현재 시간표 유저 선택 데이터만 초기화"
+                className="text-amber-700 dark:text-amber-400 hover:text-amber-900 text-xs font-semibold flex items-center gap-1 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 px-2 py-1 rounded border border-amber-200 dark:border-amber-800 transition-colors"
+                title="현재 시간표 유저 선택 및 목록 초기화"
               >
                 <RotateCcw className="w-3.5 h-3.5" /> 일정 초기화
               </button>
@@ -555,7 +595,7 @@ export default function App() {
               {tabs.length > 1 && (
                 <button
                   onClick={(e) => handleDeleteTab(activeTabId, e)}
-                  className="text-red-600 hover:text-red-800 text-xs font-semibold flex items-center gap-1 bg-red-50 hover:bg-red-100 px-2 py-1 rounded border border-red-200 transition-colors"
+                  className="text-red-600 dark:text-red-400 hover:text-red-800 text-xs font-semibold flex items-center gap-1 bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/60 px-2 py-1 rounded border border-red-200 dark:border-red-800 transition-colors"
                   title="현재 시간표 탭 전체 삭제"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> 탭 삭제
@@ -568,16 +608,16 @@ export default function App() {
           <div className="flex flex-col w-full overflow-x-auto">
             {/* 요일 헤더 */}
             <div
-              className="grid gap-1 mb-1.5 text-center text-xs font-semibold text-slate-600 min-w-[500px]"
+              className="grid gap-1 mb-1.5 text-center text-xs font-semibold text-slate-600 dark:text-slate-400 min-w-[500px]"
               style={{ gridTemplateColumns: `70px repeat(${dateList.length}, minmax(0, 1fr))` }}
             >
-              <div className="py-1 bg-slate-100 rounded text-slate-500 flex items-center justify-center text-[11px]">
+              <div className="py-1 bg-slate-100 dark:bg-slate-800 rounded text-slate-500 dark:text-slate-400 flex items-center justify-center text-[11px]">
                 시간 \ 날짜
               </div>
               {dateList.map((item) => (
-                <div key={item.iso} className="py-1 bg-slate-100 rounded flex flex-col items-center justify-center">
-                  <span className="text-xs font-bold text-slate-800">{item.dayName}</span>
-                  <span className="text-[10px] text-slate-400 font-mono leading-none mt-0.5">{item.dateShort}</span>
+                <div key={item.iso} className="py-1 bg-slate-100 dark:bg-slate-800 rounded flex flex-col items-center justify-center">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{item.dayName}</span>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono leading-none mt-0.5">{item.dateShort}</span>
                 </div>
               ))}
             </div>
@@ -594,8 +634,8 @@ export default function App() {
                     style={{ gridTemplateColumns: `70px repeat(${dateList.length}, minmax(0, 1fr))` }}
                   >
                     <div
-                      className={`h-full text-slate-500 font-mono flex items-center justify-center text-[10px] bg-slate-50 rounded ${
-                        isHour ? 'font-bold text-slate-800 bg-slate-100' : ''
+                      className={`h-full text-slate-500 dark:text-slate-400 font-mono flex items-center justify-center text-[10px] bg-slate-50 dark:bg-slate-950/60 rounded ${
+                        isHour ? 'font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800' : ''
                       }`}
                     >
                       {time}
@@ -612,9 +652,11 @@ export default function App() {
                           onMouseDown={(e) => handleSlotMouseDown(slotKey, dateIdx, timeIdx, e)}
                           onMouseEnter={() => handleSlotMouseEnter(slotKey)}
                           className={`h-full rounded-[2px] transition-colors cursor-pointer flex items-center justify-center ${cellColor} ${
-                            isMySelected ? 'ring-1 ring-emerald-600 z-10' : ''
+                            isMySelected ? 'ring-1 ring-emerald-500 z-10' : ''
                           } ${
-                            isHour ? 'border-t-2 border-t-slate-300' : 'border-t border-t-slate-100'
+                            isHour
+                              ? 'border-t-2 border-t-slate-400 dark:border-t-slate-600 border-slate-200 dark:border-slate-800'
+                              : 'border-t border-t-slate-100 dark:border-t-slate-800/60'
                           }`}
                         ></div>
                       );
@@ -627,25 +669,25 @@ export default function App() {
         </div>
 
         {/* 우측 사이드바 (탭 제목, 설명 및 파티원 필터) */}
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col lg:sticky lg:top-4 space-y-4">
-          {/* 탭 헤더 정보 (상단 크게 표시) */}
-          <div className="border-b border-slate-100 pb-3">
-            <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider bg-emerald-50 px-2 py-0.5 rounded">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col lg:sticky lg:top-4 space-y-4">
+          {/* 탭 헤더 정보 */}
+          <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded">
               Active Schedule
             </span>
-            <h2 className="text-lg font-black text-slate-800 mt-1 leading-snug">
+            <h2 className="text-lg font-black mt-1 leading-snug">
               {activeTab?.title || '시간표'}
             </h2>
-            <p className="text-xs text-slate-500 mt-1 whitespace-pre-wrap leading-relaxed">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 whitespace-pre-wrap leading-relaxed">
               {activeTab?.description || '설명이 없습니다.'}
             </p>
           </div>
 
-          {/* 파티원 필터 목록 */}
+          {/* 파티원 필터 및 관리 목록 */}
           <div>
             <div className="shrink-0 mb-2.5 flex items-center justify-between">
-              <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5 text-emerald-600" /> 파티원 필터
+              <h3 className="text-xs font-bold flex items-center gap-1.5">
+                <Users className="w-3.5 h-3.5 text-emerald-500" /> 파티원 필터
               </h3>
               <span className="text-[10px] text-slate-400">
                 선택인원: {selectedUsers.length}/{schedules.length}
@@ -654,7 +696,7 @@ export default function App() {
 
             <div className="space-y-1.5 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
               {schedules.length === 0 ? (
-                <p className="text-xs text-slate-400 py-3 text-center bg-slate-50 rounded border border-dashed border-slate-200">
+                <p className="text-xs text-slate-400 dark:text-slate-500 py-3 text-center bg-slate-50 dark:bg-slate-950/40 rounded border border-dashed border-slate-200 dark:border-slate-800">
                   등록된 파티원이 없습니다.
                 </p>
               ) : (
@@ -664,21 +706,31 @@ export default function App() {
                     <div
                       key={s.user_name}
                       onClick={() => toggleUserSelect(s.user_name)}
-                      className="flex items-center justify-between p-2 rounded hover:bg-slate-50 cursor-pointer border border-slate-100 text-xs transition-colors"
+                      className="flex items-center justify-between p-2 rounded hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer border border-slate-100 dark:border-slate-800/80 text-xs transition-colors group"
                     >
                       <div className="flex items-center gap-2">
                         {isSelected ? (
-                          <CheckSquare className="w-4 h-4 text-emerald-600" />
+                          <CheckSquare className="w-4 h-4 text-emerald-500" />
                         ) : (
-                          <Square className="w-4 h-4 text-slate-300" />
+                          <Square className="w-4 h-4 text-slate-300 dark:text-slate-600" />
                         )}
-                        <span className={`${isSelected ? 'font-medium text-slate-800' : 'text-slate-400'}`}>
+                        <span className={`${isSelected ? 'font-medium' : 'text-slate-400'}`}>
                           {s.user_name}
                         </span>
                       </div>
-                      <span className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 font-mono">
-                        {s.slots?.length || 0}
-                      </span>
+
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-500 dark:text-slate-400 font-mono">
+                          {s.slots?.length || 0}
+                        </span>
+                        <button
+                          onClick={(e) => handleDeleteUser(s.user_name, e)}
+                          className="opacity-0 group-hover:opacity-100 hover:text-red-500 p-0.5 rounded transition-all text-slate-400"
+                          title="파티원 삭제"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })
@@ -690,76 +742,72 @@ export default function App() {
 
       {/* 시간표 생성 및 수정 설정 모달 */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md p-6">
+        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 w-full max-w-md p-6 text-slate-800 dark:text-slate-100">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                <Settings className="w-5 h-5 text-emerald-600" /> 
+              <h3 className="text-base font-bold flex items-center gap-2">
+                <Settings className="w-5 h-5 text-emerald-500" /> 
                 {editingTabId ? '시간표 설정 수정' : '새 시간표 설정'}
               </h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveTabModal} className="space-y-3.5">
-              {/* 시간표 제목 */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">시간표 이름</label>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">시간표 이름</label>
                 <input
                   type="text"
                   required
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   placeholder="예: 10월 2주차 발방 레이드"
-                  className="w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="w-full px-3 py-1.5 text-xs border dark:border-slate-700 bg-transparent rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
               </div>
 
-              {/* 시간표 설명 */}
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">시간표 설명</label>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">시간표 설명</label>
                 <textarea
                   rows={2}
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
                   placeholder="예: 목요일~수요일 보스 조율용입니다."
-                  className="w-full px-3 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
+                  className="w-full px-3 py-1.5 text-xs border dark:border-slate-700 bg-transparent rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none resize-none"
                 />
               </div>
 
-              {/* 시작날짜 / 종료날짜 */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">시작 날짜</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">시작 날짜</label>
                   <input
                     type="date"
                     required
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full px-2.5 py-1.5 text-xs border dark:border-slate-700 bg-transparent rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">종료 날짜</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">종료 날짜</label>
                   <input
                     type="date"
                     required
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full px-2.5 py-1.5 text-xs border dark:border-slate-700 bg-transparent rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                 </div>
               </div>
 
-              {/* 시작시간 / 종료시간 */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">시작 시간</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">시작 시간</label>
                   <select
                     value={startHour}
                     onChange={(e) => setStartHour(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full px-2.5 py-1.5 text-xs border dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
                     {Array.from({ length: 24 }, (_, i) => (
                       <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
@@ -767,11 +815,11 @@ export default function App() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">종료 시간</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">종료 시간</label>
                   <select
                     value={endHour}
                     onChange={(e) => setEndHour(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full px-2.5 py-1.5 text-xs border dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
                     {Array.from({ length: 24 }, (_, i) => i + 1).map((i) => (
                       <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
@@ -784,13 +832,13 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg"
+                  className="px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
                 >
                   취소
                 </button>
                 <button
                   type="submit"
-                  className="px-3.5 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow"
+                  className="px-3.5 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow transition-colors"
                 >
                   {editingTabId ? '수정사항 저장' : '시간표 생성'}
                 </button>
