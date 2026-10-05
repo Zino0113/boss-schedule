@@ -351,7 +351,7 @@ export default function App() {
         }
       }
 
-      alert('시간표 설정이 수정되었습니다. (범위 내 기존 일정 유지)');
+      alert('시간표 설정이 수정되었습니다.');
     } else {
       const newTabObj = {
         id: `tab-${Date.now()}`,
@@ -585,7 +585,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* 탭 바 */}
+      {}
       <div className="max-w-7xl w-full mx-auto mb-2 flex items-center gap-1 overflow-x-auto pb-1 border-b border-slate-200 dark:border-slate-800">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
@@ -628,8 +628,11 @@ export default function App() {
       <main className="max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
         <div className="lg:col-span-3 bg-white dark:bg-slate-900 p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col">
           <div className="flex flex-wrap justify-between items-center gap-2 mb-3 shrink-0">
-            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-              * {isLoggedIn ? 'Shift + 클릭으로 직사각형 범위를 선택할 수 있습니다.' : '입장 후 가능 시간을 수정할 수 있습니다.'}
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2">
+              <span>* {isLoggedIn ? 'Shift + 클릭으로 직사각형 범위를 선택할 수 있습니다.' : '입장 후 가능 시간을 수정할 수 있습니다.'}</span>
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span> 내 선택: 파란색 테두리/점
+              </span>
             </span>
 
             <div className="flex items-center gap-1.5">
@@ -681,6 +684,7 @@ export default function App() {
               ))}
             </div>
 
+            {}
             <div className="space-y-[1px] min-w-[500px]">
               {timeSlots.map((slotObj, timeIdx) => {
                 const { time, isHour, isMidnight, dayOffset } = slotObj;
@@ -721,8 +725,10 @@ export default function App() {
                           key={slotKey}
                           onMouseDown={(e) => handleSlotMouseDown(slotKey, dateIdx, timeIdx, e)}
                           onMouseEnter={() => handleSlotMouseEnter(slotKey)}
-                          className={`h-full rounded-[2px] transition-colors cursor-pointer flex items-center justify-center ${cellColor} ${
-                            isMySelected ? 'ring-1 ring-emerald-500 z-10' : ''
+                          className={`h-full rounded-[2px] transition-colors cursor-pointer flex items-center justify-center relative ${cellColor} ${
+                            isMySelected 
+                              ? 'ring-2 ring-blue-500 dark:ring-blue-400 z-20 shadow-md' 
+                              : ''
                           } ${
                             isMidnight
                               ? 'border-t-2 border-t-purple-500 dark:border-t-purple-400 border-slate-200 dark:border-slate-800'
@@ -730,7 +736,12 @@ export default function App() {
                               ? 'border-t-2 border-t-slate-400 dark:border-t-slate-600 border-slate-200 dark:border-slate-800'
                               : 'border-t border-t-slate-100 dark:border-t-slate-800/60'
                           }`}
-                        ></div>
+                        >
+                          {/* 내가 선택한 슬롯 내부에 또렷한 선명 블루 인디케이터 표시 */}
+                          {isMySelected && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400 shadow-sm shrink-0"></span>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
