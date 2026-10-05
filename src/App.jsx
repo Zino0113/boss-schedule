@@ -353,16 +353,68 @@ export default function App() {
     if (!window.confirm('이 시간표를 정말 삭제하시겠습니까? 관련된 인원 일정 데이터도 함께 삭제됩니다.')) return;
 
     try {
-      await supabase.from('boss_tabs').delete().eq('id', tabId);
-      await supabase.from('boss_schedules').delete().eq('tab_id', tabId);
+      const { error: tabErr } = await supabase.from('boss_tabs').delete().eq('id', tabId);
+      if (tabErr) throw tabErr;
+      const { error: schedErr } = await supabase.from('boss_schedules').delete().eq('tab_id', tabId);
+      if (schedErr) throw schedErr;
     } catch (err) {
       console.warn('Delete tab error:', err);
+      alert(`삭제 실패: ${err.message || '오류가 발생했습니다.'}`);
+      return;
     }
 
     const filtered = tabs.filter((t) => t.id !== tabId);
     setTabs(filtered);
     if (activeTabId === tabId) {
       setActiveTabId(filtered[0].id);
+    }
+  };
+
+  const handleResetTabSchedules = async () => {
+    if (!window.confirm(`⚠️ [${activeTab?.title}] 시간표의 모든 파티원 가능 시간 및 참여자 목록을 초기화하시겠습니까?\n(시간표 설정은 유지됩니다.)`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('boss_schedules')
+        .delete()
+        .eq('tab_id', activeTabId);
+
+      if (error) throw error;
+
+      setMySlots([]);
+      setSchedules([]);
+      setSelectedUsers([]);
+      alert('시간표의 모든 유저 일정 및 참여자 목록이 초기화되었습니다.');
+    } catch (err) {
+      console.error('초기화 에러:', err);
+      alert(`초기화 실패: ${err.message || 'DB 삭제 중 오류가 발생했습니다.'}`);
+    }
+  };
+
+  // 파티원 개별 삭제
+  const handleDeleteUser = async (targetUserName, e) => {
+    e.stopPropagation();
+    if (!window.confirm(`'${targetUserName}' 파티원의 일정을 이 시간표에서 삭제하시겠습니까?`)) return;
+
+    try {
+      const { error } = await supabase
+        .from('boss_schedules')
+        .delete()
+        .eq('tab_id', activeTabId)
+        .eq('user_name', targetUserName);
+
+      if (error) throw error;
+
+      setSchedules((prev) => prev.filter((s) => s.user_name !== targetUserName));
+      setSelectedUsers((prev) => prev.filter((u) => u !== targetUserName));
+      if (targetUserName === userName) {
+        setMySlots([]);
+      }
+    } catch (err) {
+      console.error('User delete error:', err);
+      alert(`삭제 실패: ${err.message || 'DB 삭제 중 오류가 발생했습니다.'}`);
     }
   };
 
