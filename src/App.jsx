@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { 
   Users, Clock, Save, RefreshCw, CheckSquare, Square, LogIn, 
-  RotateCcw, Plus, X, Calendar, Settings, Trash2, Edit3, Sun, Moon 
+  RotateCcw, Plus, X, Calendar, Settings, Trash2, Edit3, Sun, Moon, MoonStar
 } from 'lucide-react';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -17,6 +17,14 @@ const formatDateToISO = (date) => {
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const dd = String(date.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
+};
+
+// 날짜에 일수 더하기 헬퍼
+const addDaysToISO = (isoStr, days) => {
+  if (!isoStr) return isoStr;
+  const d = new Date(isoStr);
+  d.setDate(d.getDate() + days);
+  return formatDateToISO(d);
 };
 
 // 시작일~종료일 사이의 날짜 목록 생성 (최대 14일)
@@ -43,16 +51,34 @@ const generateDateList = (startDateStr, endDateStr) => {
   return result;
 };
 
-// 시작시간~종료시간 타임 슬롯 생성 (30분 단위)
-const generateTimeSlots = (startHour, endHour) => {
+// 시작 시각(기본 9시)부터 총 운영 시간(기본 24시간) 동안의 타임 슬롯 생성
+const generateTimeSlotsEx = (startHour = 9, durationHours = 24) => {
   const slots = [];
   const start = parseInt(startHour, 10);
-  const end = parseInt(endHour, 10);
+  const count = parseInt(durationHours, 10);
 
-  for (let h = start; h < end; h++) {
-    const hourStr = String(h).padStart(2, '0');
-    slots.push(`${hourStr}:00`);
-    slots.push(`${hourStr}:30`);
+  for (let i = 0; i < count; i++) {
+    const rawHour = start + i;
+    const actualHour = rawHour % 24;
+    const dayOffset = Math.floor(rawHour / 24);
+    const hourStr = String(actualHour).padStart(2, '0');
+
+    slots.push({
+      time: `${hourStr}:00`,
+      displayTime: `${hourStr}:00`,
+      dayOffset,
+      actualHour,
+      isMidnight: actualHour === 0 && i > 0,
+      isHour: true
+    });
+    slots.push({
+      time: `${hourStr}:30`,
+      displayTime: `${hourStr}:30`,
+      dayOffset,
+      actualHour,
+      isMidnight: false,
+      isHour: false
+    });
   }
   return slots;
 };
@@ -85,8 +111,8 @@ export default function App() {
     d.setDate(d.getDate() + 6);
     return formatDateToISO(d);
   });
-  const [startHour, setStartHour] = useState(0);
-  const [endHour, setEndHour] = useState(24);
+  const [startHour, setStartHour] = useState(9); // 기본 09:00 시작
+  const [durationHours, setDurationHours] = useState(24); // 기본 24시간 기준
 
   // 드래그 및 범주 선택 State
   const [isDragging, setIsDragging] = useState(false);
@@ -111,7 +137,7 @@ export default function App() {
         .order('created_at', { ascending: true });
 
       if (error && error.code !== 'PGRST116') {
-        console.warn('boss_tabs 테이블 사용 불가 - 메모리 모드로 동작:', error.message);
+        console.warn('boss_tabs 테이블 조회 경고:', error.message);
       } else if (data && data.length > 0) {
         setTabs(data);
         if (!activeTabId) {
@@ -123,19 +149,19 @@ export default function App() {
       console.error('Fetch tabs error:', e);
     }
 
-    // 기본 탭 설정
+    // 기본 탭 설정 (09:00 시작 ~ 24시간)
     const defaultTab = {
       id: 'default-tab-1',
       title: '주간 레이드',
-      description: '파티원 가능 시간 조사',
+      description: '파티원 가능 시간 조사 (09:00 ~ 다음날 09:00)',
       start_date: formatDateToISO(new Date()),
       end_date: (() => {
         const d = new Date();
         d.setDate(d.getDate() + 6);
         return formatDateToISO(d);
       })(),
-      start_hour: 0,
-      end_hour: 24
+      start_hour: 9,
+      duration_hours: 24
     };
     setTabs([defaultTab]);
     setActiveTabId(defaultTab.id);
@@ -178,7 +204,10 @@ export default function App() {
   // 현재 활성화된 탭 개체
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0] || {};
   const dateList = activeTab?.start_date ? generateDateList(activeTab.start_date, activeTab.end_date) : [];
-  const timeSlots = activeTab ? generateTimeSlots(activeTab.start_hour || 0, activeTab.end_hour || 24) : [];
+  const timeSlots = generateTimeSlotsEx(
+    activeTab.start_hour ?? 9,
+    activeTab.duration_hours ?? 24
+  );
 
   const handleLogin = (e) => {
     e.preventDefault();
@@ -198,7 +227,6 @@ export default function App() {
   const handleSave = async () => {
     if (!userName || !activeTabId) return;
     try {
-      // 1) 해당 탭 + 유저의 기존 레코드를 PK(id) 기반으로 조회
       const { data: existingList, error: selectError } = await supabase
         .from('boss_schedules')
         .select('id')
@@ -210,7 +238,6 @@ export default function App() {
       }
 
       if (existingList && existingList.length > 0) {
-        // 기존 레코드가 있으면 첫 번째 id 기준으로 UPDATE
         const targetId = existingList[0].id;
         const { error: updateError } = await supabase
           .from('boss_schedules')
@@ -219,13 +246,11 @@ export default function App() {
 
         if (updateError) throw updateError;
 
-        // 혹시 이전에 중복으로 쌓인 레코드가 있다면 깔끔하게 자동 정리
         if (existingList.length > 1) {
           const duplicateIds = existingList.slice(1).map((item) => item.id);
           await supabase.from('boss_schedules').delete().in('id', duplicateIds);
         }
       } else {
-        // 없으면 새로 INSERT
         const { error: insertError } = await supabase
           .from('boss_schedules')
           .insert([{ tab_id: activeTabId, user_name: userName, slots: mySlots }]);
@@ -249,8 +274,8 @@ export default function App() {
     const d = new Date();
     d.setDate(d.getDate() + 6);
     setEndDate(formatDateToISO(d));
-    setStartHour(0);
-    setEndHour(24);
+    setStartHour(9);
+    setDurationHours(24);
     setIsModalOpen(true);
   };
 
@@ -261,13 +286,16 @@ export default function App() {
     setNewDescription(activeTab.description || '');
     setStartDate(activeTab.start_date || formatDateToISO(new Date()));
     setEndDate(activeTab.end_date || formatDateToISO(new Date()));
-    setStartHour(activeTab.start_hour ?? 0);
-    setEndHour(activeTab.end_hour ?? 24);
+    setStartHour(activeTab.start_hour ?? 9);
+    setDurationHours(activeTab.duration_hours ?? 24);
     setIsModalOpen(true);
   };
 
   const handleSaveTabModal = async (e) => {
     e.preventDefault();
+
+    const startH = parseInt(startHour, 10);
+    const durH = parseInt(durationHours, 10);
 
     if (editingTabId) {
       const updatedTabObj = {
@@ -276,8 +304,8 @@ export default function App() {
         description: newDescription || '',
         start_date: startDate,
         end_date: endDate,
-        start_hour: parseInt(startHour, 10),
-        end_hour: parseInt(endHour, 10)
+        start_hour: startH,
+        duration_hours: durH
       };
 
       try {
@@ -288,12 +316,15 @@ export default function App() {
 
       setTabs((prev) => prev.map((t) => (t.id === editingTabId ? updatedTabObj : t)));
 
-      const validDates = generateDateList(startDate, endDate).map((d) => d.iso);
-      const validTimes = generateTimeSlots(startHour, endHour);
+      // 변경된 범위 계산 및 유효 슬롯 필터링
+      const newDates = generateDateList(startDate, endDate);
+      const newSlotsEx = generateTimeSlotsEx(startH, durH);
       const validKeysSet = new Set();
-      validDates.forEach((d) => {
-        validTimes.forEach((t) => {
-          validKeysSet.add(`${d}-${t}`);
+
+      newDates.forEach((d) => {
+        newSlotsEx.forEach((slot) => {
+          const actualDate = slot.dayOffset > 0 ? addDaysToISO(d.iso, slot.dayOffset) : d.iso;
+          validKeysSet.add(`${actualDate}-${slot.time}`);
         });
       });
 
@@ -319,7 +350,7 @@ export default function App() {
         }
       }
 
-      alert('시간표 설정이 수정되었습니다. (새 범위 내 기존 일정 자동 유지)');
+      alert('시간표 설정이 수정되었습니다. (범위 내 기존 일정 유지)');
     } else {
       const newTabObj = {
         id: `tab-${Date.now()}`,
@@ -327,8 +358,8 @@ export default function App() {
         description: newDescription || '',
         start_date: startDate,
         end_date: endDate,
-        start_hour: parseInt(startHour, 10),
-        end_hour: parseInt(endHour, 10)
+        start_hour: startH,
+        duration_hours: durH
       };
 
       try {
@@ -350,13 +381,14 @@ export default function App() {
       alert('최소 하나의 시간표는 존재해야 합니다.');
       return;
     }
-    if (!window.confirm('이 시간표를 정말 삭제하시겠습니까? 관련된 인원 일정 데이터도 함께 삭제됩니다.')) return;
+    if (!window.confirm('이 시간표를 정말 삭제하시겠습니까? 관련 데이터도 모두 삭제됩니다.')) return;
 
     try {
+      const { error: schedErr } = await supabase.from('boss_schedules').delete().eq('tab_id', tabId);
+      if (schedErr) console.warn('Delete schedules warn:', schedErr.message);
+
       const { error: tabErr } = await supabase.from('boss_tabs').delete().eq('id', tabId);
       if (tabErr) throw tabErr;
-      const { error: schedErr } = await supabase.from('boss_schedules').delete().eq('tab_id', tabId);
-      if (schedErr) throw schedErr;
     } catch (err) {
       console.warn('Delete tab error:', err);
       alert(`삭제 실패: ${err.message || '오류가 발생했습니다.'}`);
@@ -371,7 +403,7 @@ export default function App() {
   };
 
   const handleResetTabSchedules = async () => {
-    if (!window.confirm(`⚠️ [${activeTab?.title}] 시간표의 모든 파티원 가능 시간 및 참여자 목록을 초기화하시겠습니까?\n(시간표 설정은 유지됩니다.)`)) {
+    if (!window.confirm(`⚠️ [${activeTab?.title}] 시간표의 모든 파티원 가능 시간 및 참여자 목록을 초기화하시겠습니까?`)) {
       return;
     }
 
@@ -393,7 +425,6 @@ export default function App() {
     }
   };
 
-  // 파티원 개별 삭제
   const handleDeleteUser = async (targetUserName, e) => {
     e.stopPropagation();
     if (!window.confirm(`'${targetUserName}' 파티원의 일정을 이 시간표에서 삭제하시겠습니까?`)) return;
@@ -431,7 +462,10 @@ export default function App() {
       for (let d = startDateIdx; d <= endDateIdx; d++) {
         for (let t = startTimeIdx; t <= endTimeIdx; t++) {
           if (dateList[d] && timeSlots[t]) {
-            rangeSlots.push(`${dateList[d].iso}-${timeSlots[t]}`);
+            const slotObj = timeSlots[t];
+            const baseDateIso = dateList[d].iso;
+            const actualDateIso = slotObj.dayOffset > 0 ? addDaysToISO(baseDateIso, slotObj.dayOffset) : baseDateIso;
+            rangeSlots.push(`${actualDateIso}-${slotObj.time}`);
           }
         }
       }
@@ -592,6 +626,7 @@ export default function App() {
         </button>
       </div>
 
+      {}
       {/* 메인 콘텐츠 영역 */}
       <main className="max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
         {/* 좌측 메인 시간표 */}
@@ -640,7 +675,7 @@ export default function App() {
             {/* 요일 헤더 */}
             <div
               className="grid gap-1 mb-1.5 text-center text-xs font-semibold text-slate-600 dark:text-slate-400 min-w-[500px]"
-              style={{ gridTemplateColumns: `70px repeat(${dateList.length}, minmax(0, 1fr))` }}
+              style={{ gridTemplateColumns: `80px repeat(${dateList.length}, minmax(0, 1fr))` }}
             >
               <div className="py-1 bg-slate-100 dark:bg-slate-800 rounded text-slate-500 dark:text-slate-400 flex items-center justify-center text-[11px]">
                 시간 \ 날짜
@@ -655,25 +690,39 @@ export default function App() {
 
             {/* 타임 슬롯 리스트 */}
             <div className="space-y-[1px] min-w-[500px]">
-              {timeSlots.map((time, timeIdx) => {
-                const isHour = time.endsWith(':00');
+              {timeSlots.map((slotObj, timeIdx) => {
+                const { time, isHour, isMidnight, dayOffset } = slotObj;
 
                 return (
                   <div
-                    key={time}
+                    key={`${timeIdx}-${time}`}
                     className="grid gap-1 w-full h-6 items-center"
-                    style={{ gridTemplateColumns: `70px repeat(${dateList.length}, minmax(0, 1fr))` }}
+                    style={{ gridTemplateColumns: `80px repeat(${dateList.length}, minmax(0, 1fr))` }}
                   >
+                    {/* 시간 축 피드백 */}
                     <div
-                      className={`h-full text-slate-500 dark:text-slate-400 font-mono flex items-center justify-center text-[10px] bg-slate-50 dark:bg-slate-950/60 rounded ${
-                        isHour ? 'font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800' : ''
+                      className={`h-full font-mono flex items-center justify-center text-[10px] rounded px-1 transition-colors ${
+                        isMidnight
+                          ? 'bg-purple-900/40 dark:bg-purple-950 text-purple-300 font-extrabold border border-purple-500/50'
+                          : isHour
+                          ? 'font-bold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800'
+                          : 'text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-950/60'
                       }`}
                     >
-                      {time}
+                      {isMidnight ? (
+                        <span className="flex items-center gap-0.5 text-[9px] text-purple-400 dark:text-purple-300">
+                          <MoonStar className="w-3 h-3 text-purple-400 shrink-0" />
+                          00:00 (+1d)
+                        </span>
+                      ) : (
+                        time
+                      )}
                     </div>
 
                     {dateList.map((dateItem, dateIdx) => {
-                      const slotKey = `${dateItem.iso}-${time}`;
+                      // 실제 저장될 ISO 날짜 계산 (자정을 넘어선 새벽 시간대일 경우 다음날로 마핑)
+                      const actualSlotDate = dayOffset > 0 ? addDaysToISO(dateItem.iso, dayOffset) : dateItem.iso;
+                      const slotKey = `${actualSlotDate}-${time}`;
                       const isMySelected = mySlots.includes(slotKey);
                       const cellColor = getCellColor(slotKey);
 
@@ -685,7 +734,9 @@ export default function App() {
                           className={`h-full rounded-[2px] transition-colors cursor-pointer flex items-center justify-center ${cellColor} ${
                             isMySelected ? 'ring-1 ring-emerald-500 z-10' : ''
                           } ${
-                            isHour
+                            isMidnight
+                              ? 'border-t-2 border-t-purple-500 dark:border-t-purple-400 border-slate-200 dark:border-slate-800'
+                              : isHour
                               ? 'border-t-2 border-t-slate-400 dark:border-t-slate-600 border-slate-200 dark:border-slate-800'
                               : 'border-t border-t-slate-100 dark:border-t-slate-800/60'
                           }`}
@@ -699,6 +750,7 @@ export default function App() {
           </div>
         </div>
 
+        {}
         {/* 우측 사이드바 (탭 제목, 설명 및 파티원 필터) */}
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col lg:sticky lg:top-4 space-y-4">
           {/* 탭 헤더 정보 */}
@@ -771,6 +823,7 @@ export default function App() {
         </div>
       </main>
 
+      {}
       {/* 시간표 생성 및 수정 설정 모달 */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
@@ -834,27 +887,29 @@ export default function App() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">시작 시간</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">일일 시작 시각</label>
                   <select
                     value={startHour}
                     onChange={(e) => setStartHour(e.target.value)}
                     className="w-full px-2.5 py-1.5 text-xs border dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
-                    {Array.from({ length: 24 }, (_, i) => (
-                      <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
-                    ))}
+                    <option value={9}>09:00 (게이머/레이드 추천)</option>
+                    <option value={6}>06:00 (새벽 리셋 기준)</option>
+                    <option value={0}>00:00 (자정 기준)</option>
+                    <option value={12}>12:00 (정오 기준)</option>
+                    <option value={18}>18:00 (저녁 기준)</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">종료 시간</label>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">하루 표기 범위</label>
                   <select
-                    value={endHour}
-                    onChange={(e) => setEndHour(e.target.value)}
+                    value={durationHours}
+                    onChange={(e) => setDurationHours(e.target.value)}
                     className="w-full px-2.5 py-1.5 text-xs border dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
-                    {Array.from({ length: 24 }, (_, i) => i + 1).map((i) => (
-                      <option key={i} value={i}>{String(i).padStart(2, '0')}:00</option>
-                    ))}
+                    <option value={24}>24시간 (전일 표시)</option>
+                    <option value={18}>18시간</option>
+                    <option value={12}>12시간</option>
                   </select>
                 </div>
               </div>
