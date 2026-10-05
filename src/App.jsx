@@ -198,52 +198,46 @@ export default function App() {
   const handleSave = async () => {
     if (!userName || !activeTabId) return;
     try {
-      // 1) DB에서 해당 탭+유저 데이터가 이미 존재하는지 직접 확인
-      const { data: existingData } = await supabase
+      // 1) 해당 탭 + 유저의 기존 레코드를 PK(id) 기반으로 조회
+      const { data: existingList, error: selectError } = await supabase
         .from('boss_schedules')
         .select('id')
         .eq('tab_id', activeTabId)
-        .eq('user_name', userName)
-        .maybeSingle();
+        .eq('user_name', userName);
 
-      let error;
-      if (existingData) {
-        // 이미 존재하면 UPDATE
-        const res = await supabase
-          .from('boss_schedules')
-          .update({ slots: mySlots })
-          .eq('tab_id', activeTabId)
-          .eq('user_name', userName);
-        error = res.error;
-      } else {
-        // 없으면 INSERT
-        const res = await supabase
-          .from('boss_schedules')
-          .insert([{ tab_id: activeTabId, user_name: userName, slots: mySlots }]);
-        error = res.error;
+      if (selectError) {
+        console.error('Select schedule error:', selectError);
       }
 
-      // 혹시라도 충돌 에러(409) 등이 발생하면 upsert로 최종 구원 시도
-      if (error) {
-        const { error: upsertError } = await supabase
+      if (existingList && existingList.length > 0) {
+        // 기존 레코드가 있으면 첫 번째 id 기준으로 UPDATE
+        const targetId = existingList[0].id;
+        const { error: updateError } = await supabase
           .from('boss_schedules')
-          .upsert(
-            [{ tab_id: activeTabId, user_name: userName, slots: mySlots }],
-            { onConflict: 'tab_id,user_name' }
-          );
+          .update({ slots: mySlots })
+          .eq('id', targetId);
 
-        if (upsertError) {
-          console.error('Save failed:', upsertError);
-          alert(`저장 실패: ${upsertError.message}`);
-          return;
+        if (updateError) throw updateError;
+
+        // 혹시 이전에 중복으로 쌓인 레코드가 있다면 깔끔하게 자동 정리
+        if (existingList.length > 1) {
+          const duplicateIds = existingList.slice(1).map((item) => item.id);
+          await supabase.from('boss_schedules').delete().in('id', duplicateIds);
         }
+      } else {
+        // 없으면 새로 INSERT
+        const { error: insertError } = await supabase
+          .from('boss_schedules')
+          .insert([{ tab_id: activeTabId, user_name: userName, slots: mySlots }]);
+
+        if (insertError) throw insertError;
       }
 
       alert('일정이 성공적으로 저장되었습니다!');
       fetchSchedules(activeTabId);
     } catch (err) {
       console.error('Save error:', err);
-      alert('저장 중 오류가 발생했습니다.');
+      alert(`저장 실패: ${err.message || '저장 중 오류가 발생했습니다.'}`);
     }
   };
 
