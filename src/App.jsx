@@ -11,7 +11,6 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 const DAY_NAMES = ['일', '월', '화', '수', '목', '금', '토'];
 
-// YYYY-MM-DD 포맷 변환 헬퍼
 const formatDateToISO = (date) => {
   const yyyy = date.getFullYear();
   const mm = String(date.getMonth() + 1).padStart(2, '0');
@@ -19,7 +18,6 @@ const formatDateToISO = (date) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
-// 날짜에 일수 더하기 헬퍼
 const addDaysToISO = (isoStr, days) => {
   if (!isoStr) return isoStr;
   const d = new Date(isoStr);
@@ -27,7 +25,6 @@ const addDaysToISO = (isoStr, days) => {
   return formatDateToISO(d);
 };
 
-// 시작일~종료일 사이의 날짜 목록 생성 (최대 14일)
 const generateDateList = (startDateStr, endDateStr) => {
   if (!startDateStr || !endDateStr) return [];
   const result = [];
@@ -51,7 +48,6 @@ const generateDateList = (startDateStr, endDateStr) => {
   return result;
 };
 
-// 시작 시각(기본 9시)부터 총 운영 시간(기본 24시간) 동안의 타임 슬롯 생성
 const generateTimeSlotsEx = (startHour = 9, durationHours = 24) => {
   const slots = [];
   const start = parseInt(startHour, 10);
@@ -91,16 +87,13 @@ export default function App() {
   const [userName, setUserName] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  // 탭 목록 & 현재 활성 탭
   const [tabs, setTabs] = useState([]);
   const [activeTabId, setActiveTabId] = useState(null);
 
-  // 현재 탭의 일정 데이터
   const [schedules, setSchedules] = useState([]);
   const [mySlots, setMySlots] = useState([]);
   const [selectedUsers, setSelectedUsers] = useState([]);
 
-  // 모달 창 State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTabId, setEditingTabId] = useState(null);
   const [newTitle, setNewTitle] = useState('발방 레이드');
@@ -111,16 +104,14 @@ export default function App() {
     d.setDate(d.getDate() + 6);
     return formatDateToISO(d);
   });
-  const [startHour, setStartHour] = useState(9); // 기본 09:00 시작
-  const [durationHours, setDurationHours] = useState(24); // 기본 24시간 기준
+  const [startHour, setStartHour] = useState(9);
+  const [durationHours, setDurationHours] = useState(24);
 
-  // 드래그 및 범주 선택 State
   const [isDragging, setIsDragging] = useState(false);
   const [dragMode, setDragMode] = useState(true);
   const [lastSelectedSlot, setLastSelectedSlot] = useState(null);
   const isMouseDown = useRef(false);
 
-  // 다크모드 토글 및 저장
   const toggleDarkMode = () => {
     setDarkMode((prev) => {
       const next = !prev;
@@ -139,9 +130,15 @@ export default function App() {
       if (error && error.code !== 'PGRST116') {
         console.warn('boss_tabs 테이블 조회 경고:', error.message);
       } else if (data && data.length > 0) {
-        setTabs(data);
+        const formattedTabs = data.map((t) => ({
+          ...t,
+          start_hour: t.start_hour !== undefined && t.start_hour !== null ? Number(t.start_hour) : 9,
+          duration_hours: t.duration_hours !== undefined && t.duration_hours !== null ? Number(t.duration_hours) : 24
+        }));
+
+        setTabs(formattedTabs);
         if (!activeTabId) {
-          setActiveTabId(data[0].id);
+          setActiveTabId(formattedTabs[0].id);
         }
         return;
       }
@@ -149,7 +146,6 @@ export default function App() {
       console.error('Fetch tabs error:', e);
     }
 
-    // 기본 탭 설정 (09:00 시작 ~ 24시간)
     const defaultTab = {
       id: 'default-tab-1',
       title: '주간 레이드',
@@ -201,7 +197,6 @@ export default function App() {
     }
   }, [activeTabId, userName]);
 
-  // 현재 활성화된 탭 개체
   const activeTab = tabs.find((t) => t.id === activeTabId) || tabs[0] || {};
   const dateList = activeTab?.start_date ? generateDateList(activeTab.start_date, activeTab.end_date) : [];
   const timeSlots = generateTimeSlotsEx(
@@ -309,14 +304,20 @@ export default function App() {
       };
 
       try {
-        await supabase.from('boss_tabs').update(updatedTabObj).eq('id', editingTabId);
+        await supabase.from('boss_tabs').update({
+          title: updatedTabObj.title,
+          description: updatedTabObj.description,
+          start_date: updatedTabObj.start_date,
+          end_date: updatedTabObj.end_date,
+          start_hour: updatedTabObj.start_hour,
+          duration_hours: updatedTabObj.duration_hours
+        }).eq('id', editingTabId);
       } catch (err) {
         console.warn('Supabase update tab fail:', err);
       }
 
       setTabs((prev) => prev.map((t) => (t.id === editingTabId ? updatedTabObj : t)));
 
-      // 변경된 범위 계산 및 유효 슬롯 필터링
       const newDates = generateDateList(startDate, endDate);
       const newSlotsEx = generateTimeSlotsEx(startH, durH);
       const validKeysSet = new Set();
@@ -538,7 +539,6 @@ export default function App() {
 
   return (
     <div className={`${darkMode ? 'dark bg-slate-950 text-slate-100' : 'bg-slate-50 text-slate-800'} min-h-screen p-3 md:p-6 select-none flex flex-col pb-12 transition-colors duration-200`} onMouseUp={handleMouseUp}>
-      {/* 최상단 헤더 */}
       <header className="max-w-7xl w-full mx-auto mb-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div className="flex items-center gap-2.5">
           <Clock className="w-7 h-7 text-emerald-500" />
@@ -550,7 +550,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* 다크모드 토글 및 닉네임 바 */}
         <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
           <button
             onClick={toggleDarkMode}
@@ -586,7 +585,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* 탭 바 영역 */}
+      {/* 탭 바 */}
       <div className="max-w-7xl w-full mx-auto mb-2 flex items-center gap-1 overflow-x-auto pb-1 border-b border-slate-200 dark:border-slate-800">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
@@ -615,7 +614,6 @@ export default function App() {
           );
         })}
 
-        {/* 새 시간표 추가 버튼 */}
         <button
           onClick={openCreateModal}
           className="p-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 hover:bg-emerald-200 dark:hover:bg-emerald-900 text-emerald-800 dark:text-emerald-300 transition-colors flex items-center gap-1 text-xs font-semibold px-2.5 shrink-0"
@@ -627,11 +625,8 @@ export default function App() {
       </div>
 
       {}
-      {/* 메인 콘텐츠 영역 */}
       <main className="max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
-        {/* 좌측 메인 시간표 */}
         <div className="lg:col-span-3 bg-white dark:bg-slate-900 p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col">
-          {/* 상단 액션 바 */}
           <div className="flex flex-wrap justify-between items-center gap-2 mb-3 shrink-0">
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
               * {isLoggedIn ? 'Shift + 클릭으로 직사각형 범위를 선택할 수 있습니다.' : '입장 후 가능 시간을 수정할 수 있습니다.'}
@@ -670,9 +665,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 시간표 그리드 */}
           <div className="flex flex-col w-full overflow-x-auto">
-            {/* 요일 헤더 */}
             <div
               className="grid gap-1 mb-1.5 text-center text-xs font-semibold text-slate-600 dark:text-slate-400 min-w-[500px]"
               style={{ gridTemplateColumns: `80px repeat(${dateList.length}, minmax(0, 1fr))` }}
@@ -688,7 +681,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* 타임 슬롯 리스트 */}
             <div className="space-y-[1px] min-w-[500px]">
               {timeSlots.map((slotObj, timeIdx) => {
                 const { time, isHour, isMidnight, dayOffset } = slotObj;
@@ -699,7 +691,6 @@ export default function App() {
                     className="grid gap-1 w-full h-6 items-center"
                     style={{ gridTemplateColumns: `80px repeat(${dateList.length}, minmax(0, 1fr))` }}
                   >
-                    {/* 시간 축 피드백 */}
                     <div
                       className={`h-full font-mono flex items-center justify-center text-[10px] rounded px-1 transition-colors ${
                         isMidnight
@@ -720,7 +711,6 @@ export default function App() {
                     </div>
 
                     {dateList.map((dateItem, dateIdx) => {
-                      // 실제 저장될 ISO 날짜 계산 (자정을 넘어선 새벽 시간대일 경우 다음날로 마핑)
                       const actualSlotDate = dayOffset > 0 ? addDaysToISO(dateItem.iso, dayOffset) : dateItem.iso;
                       const slotKey = `${actualSlotDate}-${time}`;
                       const isMySelected = mySlots.includes(slotKey);
@@ -751,9 +741,7 @@ export default function App() {
         </div>
 
         {}
-        {/* 우측 사이드바 (탭 제목, 설명 및 파티원 필터) */}
         <div className="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col lg:sticky lg:top-4 space-y-4">
-          {/* 탭 헤더 정보 */}
           <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
             <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded">
               Active Schedule
@@ -766,7 +754,6 @@ export default function App() {
             </p>
           </div>
 
-          {/* 파티원 필터 및 관리 목록 */}
           <div>
             <div className="shrink-0 mb-2.5 flex items-center justify-between">
               <h3 className="text-xs font-bold flex items-center gap-1.5">
@@ -824,7 +811,6 @@ export default function App() {
       </main>
 
       {}
-      {/* 시간표 생성 및 수정 설정 모달 */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 w-full max-w-md p-6 text-slate-800 dark:text-slate-100">
@@ -893,9 +879,11 @@ export default function App() {
                     onChange={(e) => setStartHour(e.target.value)}
                     className="w-full px-2.5 py-1.5 text-xs border dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
-                    <option value={9}>09:00 (발방 기준)</option>
-                    <option value={6}>06:00 (일반인 기준)</option>
+                    <option value={9}>09:00 (게이머/레이드 추천)</option>
+                    <option value={6}>06:00 (새벽 리셋 기준)</option>
                     <option value={0}>00:00 (자정 기준)</option>
+                    <option value={12}>12:00 (정오 기준)</option>
+                    <option value={18}>18:00 (저녁 기준)</option>
                   </select>
                 </div>
                 <div>
