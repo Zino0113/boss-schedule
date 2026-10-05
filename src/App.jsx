@@ -198,19 +198,47 @@ export default function App() {
   const handleSave = async () => {
     if (!userName || !activeTabId) return;
     try {
-      const existing = schedules.find((s) => s.user_name === userName);
+      // 1) DB에서 해당 탭+유저 데이터가 이미 존재하는지 직접 확인
+      const { data: existingData } = await supabase
+        .from('boss_schedules')
+        .select('id')
+        .eq('tab_id', activeTabId)
+        .eq('user_name', userName)
+        .maybeSingle();
 
-      if (existing) {
-        await supabase
+      let error;
+      if (existingData) {
+        // 이미 존재하면 UPDATE
+        const res = await supabase
           .from('boss_schedules')
           .update({ slots: mySlots })
           .eq('tab_id', activeTabId)
           .eq('user_name', userName);
+        error = res.error;
       } else {
-        await supabase
+        // 없으면 INSERT
+        const res = await supabase
           .from('boss_schedules')
           .insert([{ tab_id: activeTabId, user_name: userName, slots: mySlots }]);
+        error = res.error;
       }
+
+      // 혹시라도 충돌 에러(409) 등이 발생하면 upsert로 최종 구원 시도
+      if (error) {
+        const { error: upsertError } = await supabase
+          .from('boss_schedules')
+          .upsert(
+            [{ tab_id: activeTabId, user_name: userName, slots: mySlots }],
+            { onConflict: 'tab_id,user_name' }
+          );
+
+        if (upsertError) {
+          console.error('Save failed:', upsertError);
+          alert(`저장 실패: ${upsertError.message}`);
+          return;
+        }
+      }
+
       alert('일정이 성공적으로 저장되었습니다!');
       fetchSchedules(activeTabId);
     } catch (err) {
