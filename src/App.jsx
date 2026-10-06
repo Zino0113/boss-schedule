@@ -624,14 +624,14 @@ export default function App() {
         </button>
       </div>
 
-      {}
+      {/* 시간표 메인 구역 */}
       <main className="max-w-7xl w-full mx-auto grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
         <div className="lg:col-span-3 bg-white dark:bg-slate-900 p-3 md:p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col">
           <div className="flex flex-wrap justify-between items-center gap-2 mb-3 shrink-0">
             <span className="text-xs text-slate-500 dark:text-slate-400 font-medium flex items-center gap-2">
               <span>* {isLoggedIn ? 'Shift + 클릭으로 직사각형 범위를 선택할 수 있습니다.' : '입장 후 가능 시간을 수정할 수 있습니다.'}</span>
-              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
-                <span className="w-2 h-2 rounded-full bg-blue-500"></span> 내 선택: 파란색 테두리/점
+              <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-red-600 dark:text-red-400 font-semibold bg-red-50 dark:bg-red-950/60 px-2 py-0.5 rounded border border-red-200 dark:border-red-800">
+                <span className="w-2 h-2 rounded-full bg-red-500"></span> 내 선택: 빨간색 테두리/점
               </span>
             </span>
 
@@ -727,7 +727,7 @@ export default function App() {
                           onMouseEnter={() => handleSlotMouseEnter(slotKey)}
                           className={`h-full rounded-[2px] transition-colors cursor-pointer flex items-center justify-center relative ${cellColor} ${
                             isMySelected 
-                              ? 'ring-2 ring-blue-500 dark:ring-blue-400 z-20 shadow-md' 
+                              ? 'ring-2 ring-red-500 dark:ring-red-400 z-20 shadow-md' 
                               : ''
                           } ${
                             isMidnight
@@ -737,9 +737,9 @@ export default function App() {
                               : 'border-t border-t-slate-100 dark:border-t-slate-800/60'
                           }`}
                         >
-                          {/* 내가 선택한 슬롯 내부에 또렷한 선명 블루 인디케이터 표시 */}
+                          {/* 내가 선택한 슬롯 내부에 또렷한 선명 레드 인디케이터 표시 */}
                           {isMySelected && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 dark:bg-blue-400 shadow-sm shrink-0"></span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 dark:bg-red-400 shadow-sm shrink-0"></span>
                           )}
                         </div>
                       );
